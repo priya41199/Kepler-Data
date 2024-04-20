@@ -1,0 +1,1625 @@
+---
+title: "STUDY OF EXOPLANETS"
+output:
+  pdf_document: default
+  html_document: default
+date: '2024-03-15'
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE} 
+rm(list=ls()) 
+knitr::opts_chunk$set(echo = TRUE) 
+``` 
+```{r seed} 
+set.seed(570)
+```
+
+# Abstract
+Our study conducts a data analysis on around 10,000 exoplanet candidates from NASA's Kepler mission, focusing on their classification, habitability, and the impact of observational and stellar parameters. We explored three main questions: the influence of observational parameters on classification, the habitability of Earth-size planets around different stars, and the correlations between disposition values and flag variables. Using models like GLMM (96.98% accuracy), Random Forest, and KNN, we identified key predictors for planet classification including planetary radius and stellar effective temperature. Our findings reveal only a small fraction of exoplanets could potentially harbor liquid water, with habitability closely linked to star metallicity and planet composition. Additionally, we found significant correlations between disposition scores, commentary, and flag variables, highlighting the challenge of false positives in exoplanet detection. This research enhances our understanding of exoplanetary systems and guides future astronomical endeavors.[]
+
+**Keywords** Exoplanets, generalized linear/additive mixed models, parametric modeling, non-parametric modeling.
+
+# Introduction
+
+The Kepler Space Telescope, a pioneering mission initiated by NASA in 2009, has significantly advanced our understanding of exoplanets orbiting stars beyond the Solar System.
+Its primary mission was to survey a portion of our galaxy to discover Earth-size and smaller planets in or near the habitable zone and determine how many of the billions of stars in the Milky Way have such planets.
+By May 2016, Kepler's observations and analyses had led to the verification of 1,284 new exoplanets, marking a significant contribution to the broader field of astrophysics and expanding our knowledge of planetary systems.
+As of October 2017, the cumulative tally of confirmed exoplanets exceeded 3,000, illustrating the vastness of our galaxy's planetary diversity and the effectiveness of Kepler's observational capabilities (NASA, 2018).
+
+The dataset central to our research represents a thorough aggregation of all "objects of interest" identified by the Kepler mission, which includes approximately 10,000 exoplanet candidates.
+These candidates are subjects of interest primarily because of the characteristics they share with known exoplanets, including temperature, metallicity, etc.
+The expansive dataset not only offers insights into the variety and distribution of exoplanets but also serves as a crucial resource for statistical analysis and hypothesis testing within the astrophysical community.
+
+Our research aims to delve into the intricate relationships between the classification of these exoplanets, based on stellar parameters and their inherent properties.
+By examining these relationships, we intend to uncover the underlying reasons for the classifications of exoplanets.
+Through this analysis, we aspire to contribute to the broader scientific dialogue on exoplanetary science, offering insights that could guide future missions and observational strategies to understand the cosmos.
+
+### Importing Libraries
+
+```{r} 
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+library(readxl)
+library(lattice)
+library(data.table)
+library(dplyr)
+library(robustbase)
+library(robust)
+library(lattice)
+library(data.table)
+library(dplyr)
+library(robustbase)
+library(glmnet)
+library(caret)
+library(nlme)
+library(mgcv)
+library(pROC)
+library(lme4)
+library(glmmTMB)
+library(DHARMa)
+library(corrplot)
+library(cluster)
+library(randomForest)
+library(mltools)
+library(data.table)
+library(ggplot2)
+library(class)
+library(knitr)
+```
+
+# Data Description
+
+The Kepler Exoplanet Dataset, a robust compilation of astrophysical data, encompasses observations of 9,564 celestial bodies suspected to be exoplanets.
+It features a rich array of 50 distinct attributes for each candidate, which includes identifiers like the Kepler ID (KepID) and Kepler Object of Interest Name (KOI Name).
+Additionally, the dataset provides a wealth of stellar characteristics, such as effective temperature, along with transit properties such as duration and depth that are crucial for understanding these distant worlds.
+The central focus of our research is the Exoplanet Archive Disposition (labeled as koi_disposition in the dataset), which classifies each observed object in terms of its candidacy as an exoplanet, based on a set of criteria that includes observational data and validated models.
+This variable is pivotal for distinguishing between confirmed exoplanets, false positives, and other categories, thereby facilitating a structured approach to exoplanetary studies.
+
+```{r}
+metadata <- read.csv("metadata.csv", head = T, check.names = F)
+kable(metadata, caption = "Metadata")
+```
+
+Our research involved meticulous data cleaning to ensure the integrity and usability of the Kepler Exoplanet Dataset.
+This process included filtering out rows with 'CANDIDATE' status in the koi_disposition variable, refining this variable into a categorical factor with distinct levels for 'CONFIRMED' and 'FALSE POSITIVE' statuses, and eliminating incomplete records.
+We also streamlined the dataset by removing columns not pertinent to our analysis objectives, such as kepoi_name, koi_comment, koi_vet_stat, and koi_pdisposition.
+Also, the removal of the koi_score column was the final step in preparing the dataset for in-depth exploration and analysis.
+
+
+## DATA CLEANING
+
+```{r}
+project_data<-read.csv('main_table.csv')
+summary(project_data)
+data<-project_data
+
+# DATA CLEANING
+data <- data[data$koi_disposition != "CANDIDATE",]
+
+data$koi_disposition <- factor(data$koi_disposition, levels=c("CONFIRMED","FALSE POSITIVE"))
+# class(data$koi_disposition)
+
+complete_rows <- complete.cases(data)
+data <- data[complete_rows, ]
+
+
+##---- Remove Unwanted columns
+# Convert character columns to factors for categorical variables
+
+# Remove unnecessary character columns
+data$koi_vet_stat <- NULL
+data$koi_pdisposition <- NULL
+data$loc_rowid <- NULL
+data$kepoi_name <-NULL
+data$koi_tce_plnt_num <- NULL
+data$koi_tce_delivname <- NULL
+data$koi_score <- NULL
+data$kepler_name<- NULL
+
+
+# Removing koi_score form data
+data <- data[, !names(data) %in% "koi_score"]
+
+```
+
+### CLEANED DATA
+
+```{r}
+head(data,n=10)
+```
+
+Following the data cleaning phase, we crafted several visualizations to illuminate the characteristics of the dataset.
+
+
+### Distribution for the response variable(koi_disposition).
+
+```{r}
+
+
+response_variable <- "koi_disposition"
+numeric_data <- data[, sapply(data, is.numeric)]
+explanatory_variables <- numeric_data[, !colnames(numeric_data) %in% response_variable]
+
+# Distribution of the response variable
+counts <- as.data.frame(table(data$koi_disposition)) 
+ggplot(counts, aes(x = Var1, y = Freq, fill = Var1)) +   geom_bar(stat = "identity", position = "dodge") +   geom_text(aes(label = Freq),             position = position_dodge(width = 0.9),             vjust = -0.5) +   labs(title = "Distribution of koi_disposition",        x = "koi_disposition",        y = "Frequency")+   theme_minimal() + labs(fill = '')
+
+```
+
+From the plot, it can be observed that there are 2724 confirmed cases and 3894 false-positive cases.
+To have a thorough understanding of the distribution, it is neccessary to consider the potential of zero-truncated and zero-inflated distribution.
+In the realm of probability theory, the Zero-Truncated Poisson (ZTP) distribution is a specific discrete probability distribution limited to positive integers.
+It represents the conditional probability distribution of a variable that is Poisson-distributed, under the condition that the variable's value is nonzero.
+Therefore, a ZTP-distributed variable cannot take the value of zero.
+This distribution is initiated with the premise that it excludes the zero value, focusing solely on the positive integers as its domain ("Zero-truncated Poisson distribution", 2024).
+The Zero-inflated distribution is when an observed dataset shows a higher frequency of zero counts than what is typically expected under traditional models like the Poisson or negative binomial distributions.
+This phenomenon, characterized by the surplus of zeros, is referred to as being Zero-inflated ("Zero-inflated model", 2023).
+
+Since our response variable, koi_disposition, is categorical, so it does not have zero-truncated, zero-inflated or other specific distributions.
+
+Next, we explored the relationships between the response variables and explanatory variables through boxplots.
+
+```{r}
+
+par(mfrow=c(5,4))
+# Loop through each explanatory variable and create boxplots
+for (col in colnames(explanatory_variables)) {
+  # Create the boxplot
+  p <- ggplot(data, aes_string(x = response_variable, y = col, fill = response_variable)) +
+    geom_boxplot(position = "dodge") +
+    labs(x = "Disposition", y = col) +
+    ggtitle(paste("Relationship between", response_variable, "and", col))
+  
+  # Print the boxplot
+  print(p)
+}
+
+```
+
+The loc_rowid boxplot illustrates the relationship between koi_disposition and loc_rowid, showing the spread of row IDs for confirmed and false-positive dispositions, indicating a numerical identification of observations rather than a meaningful quantitative relationship.
+
+The kepid plot relates koi_disposition to kepid, depicting the distribution of Kepler IDs across confirmed and false-positive categories.
+Like loc_rowid, kepid serves as an identifier and does not represent a quantitative relationship.
+
+Then, the following plots explore koi_disposition against flags koi_fpflag_nt, koi_fpflag_ss, koi_fpflag_co, and koi_fpflag_ec.
+These flags are binary indicators, where a value of 1 typically represents a specific condition being true for a given exoplanet candidate.
+The plots highlight the frequency of each flag within the confirmed and false-positive categories, showing a stark contrast in koi_fpflag_ss, where the flag is predominantly set for false positives, indicating a significant secondary eclipse event.
+
+The koi_period plot connects koi_disposition with koi_period, showcasing the orbital period of the exoplanets.
+It's apparent that confirmed exoplanets have approximate same range of orbital periods as false positives group, and several outliers in both groups indicating unusually long periods.
+
+The koi_time0bk plot is the relationship between koi_disposition and koi_time0bk shows the distribution of the time of the first transit in front of the host star, again comparing confirmed to false-positive exoplanet candidates.
+There's a wider distribution in the confirmed category, suggesting a broader range of transit times among confirmed exoplanets compared to false positives.
+
+For the koi_depth plot, we see that confirmed exoplanets typically show a lower range of transit depth values, with most clustering near the bottom of the plot, which may suggest smaller planetary sizes or less obstructive transits compared to those flagged as false positives.
+
+The koi_prad plot exhibits the planetary radius with confirmed exoplanets generally having smaller radii, as shown by the compact spread of the box, whereas false positives have a wider spread, indicating a possible misclassification due to larger body sizes or observational errors.
+
+In the koi_teq plot, representing the equilibrium temperature, confirmed exoplanets have a broader interquartile range, suggesting a diverse set of thermal environments.
+False positives, while showing outliers with very high equilibrium temperatures, mainly cluster in a tighter interquartile range.
+
+For the koi_insol variable, which shows insolation flux, there is a notable difference between confirmed exoplanets, which have lower insolation fluxes, and false positives that show a higher range of insolation values.
+
+The koi_model_snr plot, depicting the signal-to-noise ratio of the transit signal, highlights a distinct pattern with confirmed exoplanets typically presenting lower SNR values compared to false positives, possibly indicating that confirmed signals are more subtle and thus harder to detect.
+
+Finally, the koi_tce_plnt_num and koi_steff plots (stellar effective temperature), and the koi_slogg and koi_srad plots (stellar surface gravity and radius, respectively) together exhibit variations in stellar characteristics associated with confirmed and false-positive exoplanet designations.
+Confirmed exoplanets are associated with stars that have a narrower range of effective temperatures, surface gravity, and radii compared to the broader ranges seen in false positives.
+These differences may reflect the varying conditions under which exoplanets are more likely to be accurately detected and confirmed.
+
+Building on our preliminary examination using boxplots to discern relationships between the response variable, koi_disposition, and various explanatory variables, we delved deeper into the interdependencies within explanatory variables via a correlation matrix.
+This step is critical for uncovering the intricate associations that can inform the development of robust predictive models.
+Through this matrix, we are able to pinpoint not only isolated pairs of variables with strong correlations but also broader patterns that might influence multiple variables simultaneously.
+Understanding these connections allows us to better prepare our data for modeling, ensuring that we account for these relationships in our analyses and improve model accuracy.
+
+```{r}
+library(corrplot)
+
+
+# Correlation
+
+numeric_data <- data[, sapply(data, is.numeric)]
+correlation_matrix <- cor(numeric_data); correlation_matrix
+correlation_matrix
+corrplot(correlation_matrix, method='color')
+```
+
+This correlation matrix visualizes the strength and direction of the relationships between pairs of variables.
+Darker shades of blue represen Variables with little to no correlation appear in a lighter shade, near the center of the color scale (closer to 0), indicating a weaker relationship.
+The diagonal line of dark blue, naturally at 1, shows each variable's perfect positive correlation with itself.
+In the correlation matrix, we see several variables with notable relationships.
+For instance, koi_prad (planetary radius) and koi_depth (transit depth) exhibit a strong positive correlation, indicating that larger planets tend to have deeper transits.
+Similarly, koi_teq (equilibrium temperature) and koi_insol (insolation flux) are positively correlated, suggesting that planets with higher equilibrium temperatures receive more stellar radiation.
+koi_steff (stellar effective temperature) and koi_srad (stellar radius) show a relationship as well, potentially indicating that larger stars have higher temperatures.
+These insights could be pivotal in building the future robust predictive models.
+
+After exploring the relationships within the explanatory variables, it is important to consider the effect of random effects in the model building.
+Random effects allow the model to account for the variability within clusters or groups that is not explained by the fixed effects (the measured variables).
+
+```{r}
+# Random Effects
+# setwd('/Users/pc/desktop/')
+data_old <- project_data
+data_old$koi_disposition <- factor(data_old$koi_disposition, levels=c("CONFIRMED","FALSE POSITIVE"))
+data_old <- na.omit(data_old, cols = "koi_disposition")
+x <-colnames(data_old)
+print(x)
+# Subset the data to keep only the rows that satisfy all conditions
+
+data_old$KOI_integer_part <- substr(data_old$kepoi_name, 1, 6)
+
+
+# Assuming 'data' is your dataset and 'KOI_integer_part' is the column containing the KOI integer parts
+
+# Count the frequency of each KOI_integer_part
+frequency <- table(data_old$KOI_integer_part)
+frequency_df <- as.data.frame(frequency)
+
+# Filter the rows where the frequency is greater than 1
+repeated_measurements <- frequency_df[frequency_df$Freq > 1, ]
+
+# Print the filtered data frame
+print(repeated_measurements)
+
+# 107 exoplanets are repeatedly measured. Therefore, it would be beneficial to consider random effects.
+
+
+# Are data dependent in time ????
+
+gam_model <- gam(koi_disposition ~ s(koi_time0bk), data = data_old, family = binomial)
+summary(gam_model)
+
+# The GAM model provided a highly significant p-value of <2e-16, which indicates a strong relationship between the response and time variable.
+# The GAM model has a edf of 4.738, which suggests a highly non-linear relationship.
+
+# Plot the response variable against time
+
+# Time variable: koi_time0bk -> The time corresponding to the center of the first detected transit in Barycentric Julian Day (BJD) minus a constant offset of 2,454,833.0 days. The offset corresponds to 12:00 on Jan 1, 2009 UTC.	
+
+summary(data_old$koi_disposition)
+ggplot(data_old, aes(x = koi_disposition, y = koi_time0bk, fill = koi_disposition)) +   geom_boxplot(position = "dodge") +   labs(x = "Disposition", y = "Time") +   ggtitle("Relationship between Disposition and Time")
+```
+
+In our analysis, we observed that certain planets in the dataset were subject to multiple measurements, suggesting the presence of potential random effects stemming from varying measurement times.
+We identified 107 planets with repeat observations and postulated that the Transit Epoch (koi_time0bk), representing the first detected transit's central time, might be linked with these multiple measurements.
+
+To assess this, we utilized a Generalized Additive Model (GAM), an appropriate choice given the categorical nature of the response variable and the expected non-linear associations.
+The statistical significance of the relationship between koi_time0bk and koi_disposition was confirmed by an extremely small p-value from the GAM output, indicating that koi_time0bk does indeed influence the likelihood of a planet's confirmed disposition.
+
+Complementary to the GAM findings, the boxplot analysis between koi_time0bk and koi_disposition revealed noticeable differences in transit epochs between the two disposition groups, reinforcing the relevance of koi_time0bk as a significant factor.
+This insight will be invaluable when we develop more robust predictive models in the future, ensuring that such random effects are adequately accounted for.
+
+## Research Questions
+
+**RQ1:** How do the various observational parameters of Kepler Objects of Interest (KOIs) influence their classification as actual planets?
+Impact of stellar parameters such as effective temperature and metallicity Impact of transit properties such as duration and depth
+
+**RQ2:** To gauge Earth-size+ planets in the habitable zone ("Goldilocks") across various star types
+
+**RQ3:** To establish the correlation between the different causes for disposition values "FALSE POSITIVE", "CONFIRMED" and "CANDIDATE".
+Also to establish the correlation between disposition values and flag variables.
+
+## How do the various observational parameters of Kepler Objects of Interest (KOIs) influence their classification as actual planets?
+
+## Impact of stellar parameters such as effective temperature and metallicity
+
+## Impact of transit properties such as duration and depth
+
+Understanding how stellar parameters like effective temperature and metallicity, as well as transit properties such as duration and depth, influence the classification of Kepler Objects of Interest (KOIs) as actual planets is crucial for refining exoplanet detection methods. Higher metallicity stars may favor planet formation, while transit properties offer insights into planetary size and orbital dynamics. Addressing these factors and their impacts enhances our ability to accurately identify and classify exoplanets.
+
+**Sampling**
+
+Since there is clear class imbalance in our dataset, let's perform resampling of our dataset. There are various approaches to this issue: we can increase the number of instances in the minority class by randomly replicating them, we can reduce the instances of the majority class by randomly removing some of its instances, or sometimes, a combination of oversampling the minority class and undersampling the majority class can yield better results.
+
+We cannot reduce the majority instances because we can't lose the data and oversampling the instances doesn't seem like good approach considering it's a scientific data captured by the keplar telescope.
+Let's try the third approach of combining undersampling and oversampling.
+
+```{r}
+set.seed(123)
+library(ROSE)
+data <- ovun.sample(koi_disposition ~ ., data = data, method = "both", p = 0.5, N = 1.5*length(data$koi_disposition), seed = 1)$data
+
+summary(data)
+```
+
+### Feature Selection
+
+We have selected the stellar and transit properties as described by NASA data categorization to start with modelling the data.
+
+# Parametric Modeling
+
+Let's start with the Generalized Linear Model (GLM) family because it offers a comprehensive and flexible framework for analyzing and interpreting diverse types of data.
+We can model the data more accurately by directly relating the response variable to linear combinations of the predictors through a suitable link function.
+Assuming that initiating our analysis with GLMs aligns closely with the underlying data structure (since our target variable is binary) and expecting more meaningful and interpretable results, we can fit the data as:
+
+## Generalized Linear Model (GLM)
+
+```{r}
+set.seed(123)
+##---- Fit glm model
+model_glm <- glm(koi_disposition ~ koi_period+koi_impact+koi_duration+koi_depth+koi_prad+koi_sma+koi_teq+koi_insol+koi_model_snr+koi_steff+koi_slogg+koi_smet+koi_srad+koi_smass+koi_kepmag , data=data, 
+               family = binomial(link = "logit"))
+
+##---- Model_1 summary
+summary(model_glm) 
+```
+
+**Significant Predictors**
+
+Variables such as koi_period, koi_time0bk, koi_impact, koi_duration, koi_depth, koi_prad, koi_teq, koi_model_snr, koi_slogg, koi_srad have very small p-values (\< 2e-16 to 2.31e-13), indicating they significantly affect the likelihood of the koi_disposition
+
+**Non Significant Predictors**
+
+Variables like kepid, koi_insol, koi_steff, and koi_kepmag have large p-values, indicating no significant evidence of their effect on koi_disposition
+
+We can see a large drop in deviance from Null deviance to Residual deviance indicating a better fit with predictors.
+
+**Step Modeling**
+
+Let's perform stepwise modeling because it offers a structured, algorithmic approach to go through the multitude of available predictors in our dataset, selecting those that contribute most significantly to our model.
+Given the complexity and the high dimensionality of our data, stepwise modeling will allow us to efficiently pinpoint the most relevant factors, ensuring that our final model is both robust and manageable.
+
+```{r}
+set.seed(123)
+suppressWarnings({
+  step_model <- step(model_glm, direction = "both")
+
+summary(step_model)
+})
+
+```
+
+The final model includes several predictors (koi_period, koi_time0bk, koi_impact, koi_duration, koi_depth, koi_prad, koi_teq, koi_model_snr, koi_steff, koi_slogg, koi_srad, and ra) after the stepwise procedure, indicating their significance in relation to koi_disposition.
+
+After reviewing the correlation matrix, and the outputs from the stepwise model selection, we can choose predictors that not only have high predictive power but also maintain a balance between statistical significance, independence (low multicollinearity), and theoretical relevance to the phenomenon being studied.
+Based on these considerations:
+
+**Significant in Stepwise Modeling:**
+
+From the stepwise model, variables that were significant and not removed in the process include:
+
+-   **koi_period**
+-   **koi_time0bk**
+-   **koi_impact**
+-   **koi_duration**
+-   **koi_depth**
+-   **koi_prad**
+-   **koi_teq**
+-   **koi_model_snr**
+-   **koi_slogg**
+-   **koi_srad**
+-   **koi_smet**
+
+
+
+These predictors are selected based on a combination statistical significance from stepwise modeling, low inter-correlations to avoid multicollinearity, and their relevance to the phenomenon under study.
+
+Back to modeling, we can fit the data to our glm model as:
+
+```{r}
+set.seed(123)
+model_glm_filtered =  glm(koi_disposition ~ koi_impact+koi_teq+koi_prad+koi_period+                            koi_duration+koi_depth+koi_model_snr+koi_slogg+koi_srad+koi_smet, data=data, 
+               family = binomial(link = "logit"))
+
+summary(model_glm_filtered)
+
+```
+
+Let's plot the residual plots for better interpretation:
+
+```{r}
+set.seed(123)
+plot(model_glm_filtered)
+```
+From the residuals vs fitted plot, there's an indication of a potential issue with a few large residuals, but the vast majority of data seems clustered around zero, indicating reasonable performance.
+Q-Q plot shows residuals may not be normally distributed, which is common for GLM with binomial outcomes.
+Scale-location plot shows some pattern indicating possible Heteroscedasticity.
+Residual vs leverage plot indicates a few points with higher leverage, which might be influential and could be potential outliers or have high leverage.
+
+Summary of each model throws a warning called "Warning: glm.fit: fitted probabilities numerically 0 or 1 occurred".
+This indicates model may be overfitting to the training data, our data may have some variables that perfectly predict the outcome, meaning that for certain values of the predictors, the outcome is always 0 or always 1, there may be outliers or influential observations that are significantly different from the rest of the data.
+
+#### Plotting Diagnostic Plots
+
+```{r}
+residuals_simulation <- simulateResiduals(fittedModel = model_glm_filtered, n = 250)
+
+# Plotting the simulated residuals
+plot(residuals_simulation)
+```
+**QQ Plot** - The Kolmogorov-Smirnov (KS) test has a p-value of 0.78884, indicating no significant deviation from the expected uniform distribution. This suggests that overall, the residuals are well-distributed. The dispersion test has a p-value of 0.008, which indicates significant overdispersion or underdispersion in the model. In the context of a binomial model, this could suggest that the variance of the response is not adequately captured by the model (i.e., the model could be over-predicting common outcomes or under-predicting rare outcomes). The outlier test has a p-value of 0.0111, suggesting the presence of significant outliers in the residuals. These are observations for which the model's predictions are substantially different from the actual values.
+
+**Residuals vs Predicted** - The residuals should be randomly scattered around zero, with no discernible pattern. However, there appears to be a pattern in the residuals, with higher deviations occurring at certain ranges of predicted values, which could indicate that the model does not fit all areas of the predictor space equally well.
+
+To deal with overfitting, let's use regularization techniques such as ridge regression or lasso, which can help prevent overfitting by penalizing the size of the coefficients.
+
+```{r}
+# Perform Lasso Regression
+set.seed(123)
+# Prepare matrix of Targets and Predictors
+x <- model.matrix(koi_disposition ~  koi_impact + koi_teq + koi_prad + 
+    koi_period + koi_duration + koi_depth + koi_model_snr + koi_slogg + 
+    koi_srad + koi_smet, data = data)
+
+y <- data$koi_disposition
+
+# Run Cross validated Lasso Regression
+cv_fit <- cv.glmnet(x ,y, family="binomial", alpha = 1) #alpha = 1 for lasso
+
+# Check the best lambda value - shrinkage parameter in lasso regression
+best_lambda <- cv_fit$lambda.min
+
+# Fit the model
+model_lasso <- glmnet(x, y, family = "binomial", alpha = 1, lambda = best_lambda)
+
+coef(model_lasso)
+
+# Plot the cv
+plot(cv_fit)
+```
+
+The output from coef(model_lasso) displays the coefficients for a Lasso regression model fitted to predict the variable koi_disposition.
+From the graph, we see the red dots which represent binomial deviance and x-axis we have log(lambda).
+Dotted vertical lines represent where min deviation occurs and grey line indicates error bars for one standard deviation between mean deviance of each lambda.
+
+It helps us to choose optimal value of regularization parameter(lambda).
+
+For Evaluation, we typically examine metrics such as Accuracy, Area Under the Curve (AUC) from the Receiver Operating Characteristic (ROC) curve, Precision, Recall, and the F1 Score.
+
+```{r} 
+# Setting a seed for reproducibility
+set.seed(123)
+trainIndex <- createDataPartition(data$koi_disposition, p = .7, list = FALSE, times = 1)
+trainData <- data[trainIndex, ]
+testData <- data[-trainIndex, ]
+
+# Create the model matrix for the new data
+testdata_matrix <- model.matrix(~  koi_impact + koi_teq + koi_prad + 
+    koi_period + koi_duration + koi_depth + koi_model_snr + koi_slogg + 
+    koi_srad + koi_smet, data = testData)
+
+# Create the model matrix for the new data
+traindata_matrix <- model.matrix(~  koi_impact + koi_teq + koi_prad + 
+    koi_period + koi_duration + koi_depth + koi_model_snr + koi_slogg + 
+    koi_srad + koi_smet,data = trainData)
+
+model_lasso_subset <- glmnet(x, y, family = "binomial", alpha = 1, lambda = best_lambda)
+
+# Make predictions on the testing data
+predicted_probabilities <- predict(model_lasso, newx = testdata_matrix, type = "response")
+
+predicted_class <- ifelse(predicted_probabilities > 0.5, "CONFIRMED", "FALSE POSITIVE")
+predicted_class <- factor(predicted_class, levels = levels(trainData$koi_disposition))
+
+# Calculate the confusion matrix
+confusion_matrix <- confusionMatrix(predicted_class, testData$koi_disposition)
+
+# Convert to a numeric vector
+predicted_probabilities <- as.numeric(predicted_probabilities)
+
+# Calculate ROC curve and AUC
+roc_result <- roc(testData$koi_disposition, predicted_probabilities)
+auc_value <- auc(roc_result)
+
+# Output the confusion matrix and AUC value
+print(confusion_matrix)
+print(auc_value)
+```
+
+The AUC value is 0.9451, which is a measure of the model's ability to discriminate between the positive and negative classes.
+An AUC of 1 represents a perfect model, while an AUC of 0.5 represents a worthless model.
+An AUC of 0.9451 suggests that the model has a very good discriminatory ability.
+
+The Accuracy of the model is 0.88
+The Kappa statistic is 0.77, which is a measure of how much better the classifier is performing over the performance of a classifier that simply guesses at random.
+
+Let's find confusion matrix values before performing regularization:
+
+```{r}
+set.seed(123)
+predicted_probabilities <- predict(model_glm_filtered, newdata = testData, type = "response")
+
+predicted_outcomes <- ifelse(predicted_probabilities > 0.5, "CONFIRMED", "FALSE POSITIVE")
+predicted_outcomes_factor <- factor(predicted_outcomes, levels = levels(testData$koi_disposition))
+
+# Use the confusionMatrix function from the caret package
+conf_matrix <- confusionMatrix(predicted_outcomes_factor, testData$koi_disposition)
+
+# Print the confusion matrix
+print(conf_matrix)
+```
+
+Results are almost similar prior to regularization.
+
+Let's plot the learning curve before regularization
+
+```{r}
+
+set.seed(123) # For reproducibility
+
+# Split your data into training and testing sets
+trainIndex <- createDataPartition(data$koi_disposition, p = .7, list = FALSE, times = 1)
+trainData <- data[trainIndex, ]
+testData <- data[-trainIndex, ]
+
+# Initialize vectors to store the performance metrics
+training_sizes <- seq(0.1, 0.9, by = 0.1) # Adjust this for more or fewer points
+train_accuracies <- numeric(length(training_sizes))
+test_accuracies <- numeric(length(training_sizes))
+
+
+scores_1 <- matrix(NA, nrow = length(training_sizes), ncol = 3)
+# Loop over the defined training sizes
+for (i in seq_along(training_sizes)) {
+  subsetIndex <- sample(seq_len(nrow(trainData)), size = floor(training_sizes[i] * nrow(trainData)))
+  trainDataSubset <- trainData[subsetIndex, ]
+  
+  # Fit the GLM model on the subset of training data
+  model_glm_filtered_subset <- glm(koi_disposition ~  koi_impact + koi_teq + koi_prad + koi_period + koi_duration + koi_depth + koi_model_snr + koi_slogg + 
+    koi_srad + koi_smet, data = trainDataSubset, family = binomial(link = "logit"))
+  
+  # Make predictions and calculate accuracy for the subset of training data
+  train_predictions <- predict(model_glm_filtered_subset, newdata = trainDataSubset, type = "response")
+  train_predicted_class <- ifelse(train_predictions > 0.5, "CONFIRMED", "FALSE POSITIVE")
+  train_accuracies[i] <- mean(train_predicted_class == trainDataSubset$koi_disposition)
+  
+  # Make predictions and calculate accuracy for the testing data
+  test_predictions <- predict(model_glm_filtered_subset, newdata = testData, type = "response")
+  test_predicted_class <- ifelse(test_predictions > 0.5, "CONFIRMED", "FALSE POSITIVE")
+  test_accuracies[i] <- mean(test_predicted_class == testData$koi_disposition)
+  
+  scores_1[i, ] <- c(floor(training_sizes[i] * nrow(data)), train_accuracies[i], test_accuracies[i])
+}
+
+
+scores_df_1 <- as.data.frame(scores_1)
+names(scores_df_1) <- c("train_size", "train_score", "test_score")
+
+ggplot(scores_df_1, aes(x = train_size)) +
+  geom_line(aes(y = train_score, color = "Training Score")) +
+  geom_line(aes(y = test_score, color = "Test Score")) +
+  scale_color_manual(values = c("blue", "red")) +
+  labs(x = "Training Size", y = "Score") +
+  ggtitle("Training and Test Score Curves for GLM") +
+  theme_minimal()+
+  scale_y_continuous(limits = c(0.50, 1))
+
+```
+
+Both the training score (red line) and the test score (blue line) are almost horizontal, suggesting that the performance of the model is quite stable across different training sizes. The model seems to have reached its performance limit with the given features and model complexity.
+
+The training and test scores are very close to each other across the entire range of training sizes. This convergence typically suggests that the model is neither overfitting nor underfitting significantly. It is well-generalized to unseen data.
+
+The score appears to be consistently high (just under 0.9), indicating good predictive performance. This level of performance might be satisfactory for the given task, depending on the complexity of the problem and the baseline or threshold for success.
+
+Overall, the learning curve suggests that the model is not learning much even if we add more data i.e there is no change in accuracy as data sizes expand.
+
+Let's plot the Learning curves after Regularization
+
+```{r}
+set.seed(123)
+suppressWarnings({
+trainIndex2 <- createDataPartition(data$koi_disposition, p = .7, list = FALSE, times = 1)
+trainData2 <- data[trainIndex2, ]
+testData2 <- data[-trainIndex2, ]
+
+# Initialize vectors to store the performance metrics
+training_sizes <- seq(0.1, 0.9, by = 0.1) # Adjust this for more or fewer points
+train_accuracies_2 <- numeric(length(training_sizes))
+test_accuracies_2 <- numeric(length(training_sizes))
+
+
+scores_2 <- matrix(NA, nrow = length(training_sizes), ncol = 3)
+# Loop over the defined training sizes
+for (i in seq_along(training_sizes)) {
+  subsetIndex <- sample(seq_len(nrow(trainData2)), size = floor(training_sizes[i] * nrow(trainData2)))
+  trainDataSubset <- trainData2[subsetIndex, ]
+  
+  # Check if trainDataSubset is empty or missing
+  if (nrow(trainDataSubset) == 0) {
+    cat("Warning: trainDataSubset is empty for training size", training_sizes[i], "\n")
+    next
+  }
+  
+  # Check if column names are present in trainDataSubset
+  required_cols <- c("koi_disposition", "koi_impact", "koi_teq", "koi_prad", "koi_period", "koi_duration", "koi_depth", "koi_model_snr", "koi_slogg", "koi_srad", "koi_smet")
+  if (!all(required_cols %in% colnames(trainDataSubset))) {
+    cat("Warning: Required columns are missing in trainDataSubset\n")
+    next
+  }
+  
+  # Fit the GLM model on the subset of training data
+  model_lasso_subset <- glmnet(as.matrix(trainDataSubset[, -1]), as.factor(trainDataSubset$koi_disposition), family = "binomial", alpha = 1, lambda = best_lambda)
+  
+  # Make predictions and calculate accuracy for the subset of training data
+  train_predictions <- predict(model_lasso_subset, newx = as.matrix(trainDataSubset[, -1]), type = "response")
+  train_predicted_class <- ifelse(train_predictions > 0.5, "CONFIRMED", "FALSE POSITIVE")
+  train_accuracies_2[i] <- mean(train_predicted_class == trainDataSubset$koi_disposition)
+  
+  # Make predictions and calculate accuracy for the testing data
+  test_predictions <- predict(model_lasso_subset, newx = as.matrix(testData2[, -1]), type = "response")
+  test_predicted_class <- ifelse(test_predictions > 0.5, "CONFIRMED", "FALSE POSITIVE")
+  test_accuracies_2[i] <- mean(test_predicted_class == testData$koi_disposition)
+  
+  scores_2[i, ] <- c(floor(training_sizes[i] * nrow(trainData2)), train_accuracies_2[i], test_accuracies_2[i])
+}
+scores_df_2 <- as.data.frame(scores_2)
+names(scores_df_2) <- c("train_size", "train_score", "test_score")
+# Create a data frame for plotting
+# learning_curve_df <- data.frame(
+#   TrainingSize = rep(training_sizes, each = 2) * nrow(trainData),
+#   Accuracy = c(train_accuracies, test_accuracies),
+#   DataSet = factor(rep(c("Training", "Testing"), each = length(train_accuracies)))
+# )
+
+ggplot(scores_df_2, aes(x = train_size)) +
+  geom_line(aes(y = train_score, color = "Training Score")) +
+  geom_line(aes(y = test_score, color = "Test Score")) +
+  scale_color_manual(values = c("blue", "red")) +
+  labs(x = "Training Size", y = "Score") +
+  ggtitle("Training and Test Score Curves for GLM") +
+  theme_minimal()+
+  scale_y_continuous(limits = c(0.50, 1))
+
+})
+```
+Both curves are situated high on the y-axis, which suggests that the model performs well on both the training and testing data. This is typically indicative of a good fit to the data. The training and testing curves are very close to each other across the entire range of training sizes. This behavior implies that the model generalizes well to unseen data and there is little to no overfitting occurring.
+
+There is minimal fluctuation in scores as the training size increases. The performance of the model is stable across different amounts of training data, indicating that additional data does not significantly change the model's predictions. Both curves are flat.. 
+
+Overall, after regularization as well, the learning curve suggests that the model is not learning much even if we add more data i.e there is no change in accuracy as data sizes expand
+
+**Generalized Additive Model (GAM)**
+
+We can test with GAM since it provides a flexible generalization of ordinary linear or generalized linear models, allowing for the modeling of non-linear relationships between the predictor variables and the response variable.
+
+```{r}
+set.seed(123)
+suppressWarnings({
+# Fit a GAM model
+gam_model <- gam(koi_disposition ~ s(koi_impact) + s(koi_teq) + s(koi_prad) + 
+                 s(koi_period) + s(koi_duration) + s(koi_depth) + 
+                 s(koi_model_snr) + s(koi_slogg) + s(koi_srad) + s(koi_smet),
+                 family = binomial(link = "logit"), data = trainData)
+
+# Summary of the GAM model
+summary(gam_model)
+
+# Make predictions
+predicted_probabilities_gam <- predict(gam_model, newdata = testData, type = "response")
+
+# ROC analysis
+roc_result_gam <- roc(testData$koi_disposition, predicted_probabilities_gam)
+
+# AUC value
+auc_value_gam <- auc(roc_result_gam)
+print(auc_value_gam)
+})
+```
+```{r}
+set.seed(123)
+print("AIC for gam_model")
+print(AIC(gam_model))
+```
+The adjusted R-squared is 68%, which means that about 68% of the variability in the data is explained by the model. Similar to R-squared, 61% of the deviance (a measure of goodness of fit) is explained by the model. The area under the curve (AUC) for your model is 0.95, which is a measure of the model's ability to discriminate between the two classes ("FALSE POSITIVE" and "CONFIRMED"). An AUC close to 1 indicates a very good discriminative ability.
+
+The edf (estimated degrees of freedom) values for the smooth terms of the predictors range from close to 1 (which would suggest a linear relationship) to around 9, which suggests a more complex, non-linear relationship.
+A higher edf value indicates a more complex shape.
+
+s(koi_impact), s(koi_teq), s(koi_prad), s(koi_period), s(koi_duration), s(koi_depth), s(koi_model_snr), s(koi_slogg), and s(koi_srad) are highly significant (p \< 0.001), indicating strong non-linear effects of these variables on the response variable.
+
+With an AUC of 0.95, our GAM model shows a strong discriminatory ability to differentiate between "CONFIRMED" and "FALSE POSITIVE" instances of koi_disposition.
+
+In summary, the GAM model shows a strong performance in classifying koi_disposition with significant non-linear effects from several predictors.
+The high AUC value suggests that the model has a high predictive accuracy.
+
+In summary, the GAM model shows a strong performance in classifying koi_disposition with significant non-linear effects from several predictors.
+The high AUC value suggests that the model has a high predictive accuracy.
+
+Let's evaluate using confusion matrix:
+
+```{r}
+set.seed(123)
+# Make predictions on the testing data
+predicted_probabilities_gam <- predict(gam_model, newdata = testData, type = "response")
+
+predicted_class_gam <- ifelse(predicted_probabilities_gam > 0.5, "CONFIRMED", "FALSE POSITIVE")
+predicted_class_gam <- factor(predicted_class, levels = levels(trainData$koi_disposition))
+
+# Calculate the confusion matrix
+confusion_matrix <- confusionMatrix(predicted_class_gam, testData$koi_disposition)
+
+
+print(confusion_matrix)
+```
+
+The model correctly predicted 88.59% of the cases.
+95% confidence interval for the accuracy, ranging from 87.7% to 89.5% suggests that the model's accuracy is reliably high.
+The Cohen's Kappa statistic of 0.77 indicates a substantial agreement between the predicted and actual values, correcting for chance agreement.
+
+```{r}
+set.seed(123)
+par(mfrow = c(2, 2)) 
+plot(gam_model)
+```
+
+Variables like koi_impact show an almost linear relationship, whereas variables such as koi_teq, koi_prad, koi_period, and koi_srad demonstrate more complex, non-linear effects on the response.
+The narrow confidence intervals around the smooth terms for variables like koi_teq imply a higher confidence in these estimates.
+In contrast, the non-significance of the koi_time0bk term and the relatively linear effect of koi_depth indicate that their relationships with the response are less pronounced.
+
+In the plots, we do not see dramatic curves or fluctuations, which might suggest that while non-linear relationships are present, they are relatively smooth and gradual changes rather than abrupt shifts.
+Overall, the GAM has identified both linear and non-linear relationships between the predictors and the response variable.
+
+Plotting Diagnostic Plots
+
+```{r}
+# If you don't have devtools installed, you need to install it first
+install.packages("devtools")
+
+# Then you can install mgcViz from GitHub
+devtools::install_github("mfasiolo/mgcViz")
+options(repos = c(CRAN="https://cloud.r-project.org"))install.packages("devtools")
+residuals_simulation_gam <- simulateResiduals(fittedModel = gam_model, n = 250)
+
+# Plotting the simulated residuals
+plot(residuals_simulation_gam)
+```
+
+#### Q-Q Plot
+
+The Kolmogorov-Smirnov (KS) test yields a p-value of 0.57946, suggesting there is no significant deviation from the expected uniform distribution, which means the model's residuals are distributed as expected. The dispersion test has a p-value of 0.056, which is just above the traditional alpha level of 0.05. This suggests that there might be a slight issue with the model's dispersion, but it's not statistically significant at the 0.05 level.
+
+#### Residual vs Predicted
+
+The residuals should be randomly scattered around the centerline (0). Here, we see a wide spread of residuals, which is common for binomial outcomes.The red curve represents the trend of the residuals. In a perfect scenario, this would be a flat line at 0. However, in this plot, the red curve indicates there might be a pattern in the residuals that the model is not capturing. Specifically, the residuals appear to fan out as the predicted values increase, which might indicate heteroscedasticity (non-constant variance).
+
+The model does not show significant issues with the overall distribution of residuals, as per the KS test, but there is evidence of outliers as indicated by the outlier test. The pattern in the residuals vs. predicted plot suggests potential model misspecification or that the variance of the residuals may not be constant across the range of predictions.
+
+## Generalized Linear Mixed Models (GLMM)
+
+Our data have multiple measurements (transit and stellar effects) taken from the same stars, which are nested within each other (i.e., measurements within stars).GLMMs are suitable when the data has a hierarchical or nested structure.
+Let's choose fixed and random effects for our model.
+
+### Fixed Effects:
+
+koi_period: The interval between consecutive planetary transits, a characteristic of the planet's orbit.
+koi_impact: The impact parameter of the transit, relating to the path the planet takes across the stellar disc.
+koi_duration: The duration of the observed transits, indicating how long the transit event lasts.
+koi_depth: The fraction of stellar flux lost at the minimum of the planetary transit, indicative of the size of the planet relative to the star.
+koi_prad: The radius of the planet, likely a key determinant of the transit depth.
+koi_teq: The equilibrium temperature of the planet, which could relate to the likelihood of the planet being confirmed.
+koi_insol: Insolation flux, similar to koi_teq, could affect planet confirmation.
+koi_model_snr: The signal-to-noise ratio of the transit detection.
+
+### Random Effects:
+
+koi_steff, koi_slogg, koi_smet, koi_srad, koi_smass - (these parameters are measured with error), these could be treated as random effects.
+
+Let's incorporate statistically significant variables in our model
+
+```{r}
+set.seed(123)
+glmm_model <- glmmTMB(koi_disposition ~ koi_impact+koi_teq+koi_prad+koi_period+koi_time0bk+
+                            koi_duration+koi_depth+koi_model_snr+
+                      (1 | koi_slogg) +
+                      (1 | koi_srad),
+                    family = binomial(link = "logit"), data = data)
+                    
+summary(glmm_model)
+
+print(c("AIC GLMM " = AIC(glmm_model), "AIC GAM" = AIC(gam_model)))
+
+# Assuming testData is your hold-out dataset
+predicted_probabilities_glmm <- predict(glmm_model, newdata = testData, type = "response")
+# Convert probabilities to binary outcomes, if necessary
+predicted_outcomes_glmm <- ifelse(predicted_probabilities_glmm > 0.5, "CONFIRMED", "FALSE POSITIVE")
+predicted_outcomes_glmm <- factor(predicted_outcomes_glmm, levels = levels(trainData$koi_disposition))
+# Compare predicted outcomes with actual outcomes
+confusionMatrix(data = predicted_outcomes_glmm, reference = testData$koi_disposition)
+
+```
+
+The summary of our Generalized Linear Mixed Model (GLMM) with a binomial family (using logit link function) reveals several insights into the relationship between the predictors (like koi_impact, koi_teq, koi_prad, etc.) and the binary outcome variable koi_disposition.
+
+An accuracy of 0.97, indicating a high level of agreement between the predicted and actual koi_disposition.
+The Kappa statistic of 0.94 suggests that the agreement between the predicted and actual outcomes is much higher than what would be expected by chance.
+
+Comparing the AIC of the GLMM model (5137) with that of a Generalized Additive Model (GAM, 3903.473) suggests that the GAM might provide a better fit to the data given its lower AIC value.
+
+Predictors like koi_impact, koi_teq, and koi_prad have significant effects on koi_disposition (p \< 0.001 for each), indicating strong evidence against the null hypothesis of no effect.
+
+Overall, our GLMM shows a strong predictive performance with high accuracy, sensitivity, and specificity, making it effective for predicting koi_disposition.
+The random effects included for koi_slogg and koi_srad seem to account for significant variability in the data, improving model fit and prediction accuracy.
+
+Plotting Diagnostic Plots
+
+```{r}
+set.seed(123)
+residuals_simulation <- simulateResiduals(fittedModel = glmm_model, n = 250)
+
+# Plotting the simulated residuals
+plot(residuals_simulation)
+```
+
+**Q-Q Plot**
+The Kolmogorov-Smirnov (KS) test has a p-value of 0.00047, which indicates a significant deviation from the expected uniform distribution. This suggests that the residuals do not follow the expected uniform pattern, indicating potential issues with the model fit. The Dispersion Test has a p-value of 0, which is highly significant and indicates that the variability of the residuals (dispersion) is not consistent with the model assumptions. This could be a sign of overdispersion or underdispersion in the data.
+
+he Outlier Test has a p-value of 0.03782, which also indicates significant deviation, meaning there are likely outliers in the residuals that the model does not account for well.
+
+**Residuals vs Fitted**
+Ideally, the residuals should scatter randomly around the centerline with no pattern. However, the plot suggests there might be a pattern in the residuals, indicated by the red trend line that deviates from the center. This indicates that the residuals are not randomly distributed, which can point to issues such as misspecification of the model. The presence of possible outliers (points far from the centerline) is particularly noticeable in the top region of the plot, corroborating the result from the outlier test on the left.
+
+The diagnostic plots suggest that the model may not fit the data adequately. There are significant deviations in the residuals' distribution from the expected uniform distribution, signs of dispersion issues, and the presence of outliers. 
+
+Let's try with choosing koi_time0bk as random effect because our data has multiple instances which belong to same category.
+
+```{r}
+set.seed(123)
+glmm_model <- glmmTMB(koi_disposition ~ koi_impact+koi_teq+koi_prad+koi_period+koi_slogg+koi_srad+
+                            koi_duration+koi_depth+koi_model_snr+ (1 | koi_time0bk),
+                    family = binomial(link = "logit"), data = data)
+                    
+summary(glmm_model)
+
+print(c("AIC GLMM " = AIC(glmm_model), "AIC GAM" = AIC(gam_model)))
+
+# Assuming testData is your hold-out dataset
+predicted_probabilities_glmm <- predict(glmm_model, newdata = testData, type = "response")
+# Convert probabilities to binary outcomes, if necessary
+predicted_outcomes_glmm <- ifelse(predicted_probabilities_glmm > 0.5, "CONFIRMED", "FALSE POSITIVE")
+predicted_outcomes_glmm <- factor(predicted_outcomes_glmm, levels = levels(trainData$koi_disposition))
+# Compare predicted outcomes with actual outcomes
+confusionMatrix(data = predicted_outcomes_glmm, reference = testData$koi_disposition)
+
+```
+Confusion Matrix shows perfect classification with an accuracy of 1. This is highly unusual and raises suspicion, as perfect classification is rare in practice. The perfect confusion matrix and the significant coefficients for all predictors suggest that the model may be overfitting the data, or there might be issues with the data itself.
+
+
+# Non-Parametric Modelling
+
+Because the distribution of the response variable remains uncertain, non-parametric modeling can be a valuable tool due to its robustness and flexibility.
+Additionally, the high number of predictor variables in our dataset poses a challenge to data modeling.
+Non-parametric models like random forest can offer feature selection during the modeling process.
+
+## K-Nearest Neighbors (KNN)
+
+For the context of non-parametric modelling, we've used K-nearest neighbors (KNN) algorithm to predict the disposition of exoplanets.
+
+The KNN algorithm is a fundamental algorithm in the study of machine learning, known for its simplicity and effectiveness in classification and regression efforts.
+In our study, we included the KNN algorithm to classify the disposition of exo planets in our data set.
+
+As a non-parametric model, unlike parametric models such as generalized additive models, the KNN algorithm does not assume any functional form for our data set, which provides a flexible approach to our predictions.
+
+The KNN algorithm works as follows:
+
+1.  Choosing the value of K, represents the number of nearest neighbors to make the prediction
+
+2.  Calculating the distance between each data point and it's neighbors using approaches such as Euclidean distance.
+
+3.  Find the K nearest neighbors with the predefined value of K
+
+4.  Assigning the category that is the most common in the K-nearest neighbors (for classification), or calculate the averages for K-nearest neighbors (for regression)
+
+5.  Make predictions based on the K-nearest neighbors from step 5.
+
+6.  Iterative this process for each data points
+
+```{r}
+# Extracting the stellar and transit parameters
+data_np <- data[, !names(data) %in% "koi_score"]
+data_np <- data_np[, c("koi_disposition", "koi_steff", "koi_slogg", "koi_srad", 
+                             "koi_period", "koi_time0bk", "koi_impact", 
+                             "koi_duration", "koi_depth", "koi_prad", 
+                             "koi_teq", "koi_insol")]
+
+
+
+# Convert 'koi_disposition' to a factor
+data_np$koi_disposition <- as.factor(data_np$koi_disposition)
+
+# Split the data into predictors (X) and the target variable (Y)
+X <- data_np[, -which(names(data_np) == "koi_disposition")]  # Exclude the target variable
+Y <- data_np$koi_disposition
+
+# Set up the parameter grid for k
+k_values <- seq(1, 40, by = 1)  # Adjust the range and step size as needed
+
+# Perform grid search
+accuracy_scores <- numeric(length(k_values))
+for (i in 1:length(k_values)) {
+  set.seed(123)  # for reproducibility
+  model_knn <- knn.cv(train = X, cl = Y, k = k_values[i])
+  accuracy_scores[i] <- mean(model_knn == Y)
+}
+
+# Find the best k value
+best_k <- k_values[which.max(accuracy_scores)]
+best_accuracy <- max(accuracy_scores)
+
+cat("Best k value:", best_k, "\n")
+cat("Best accuracy:", best_accuracy, "\n")
+```
+
+In our model, the best k value is 13, which resulted in an accuracy of 0.8090057.
+
+We split the data set into training and testing in a 70:30 percent ratio.
+Trained the data using the KNN algorithm, and used the model to predict the testing data.
+
+```{r}
+
+data_np$koi_disposition <- as.factor(data_np$koi_disposition)
+
+# Split the data into predictors (X) and the target variable (Y)
+X <- data_np[, -which(names(data_np) == "koi_disposition")]  
+
+# Exclude the target variable
+Y <- data_np$koi_disposition
+
+# Split the data into training and testing sets
+set.seed(123) 
+train_indices <- sample(1:nrow(data_np), 0.7 * nrow(data_np))
+X_train <- X[train_indices, ]
+Y_train <- Y[train_indices]
+X_test <- X[-train_indices, ]
+Y_test <- Y[-train_indices]
+
+# Train the KNN model
+k <- 1
+model_knn <- knn(train = X_train, test = X_test, cl = Y_train, k = k)
+
+# Predictions
+predictions <- as.factor(model_knn)
+
+# Evaluate the model
+conf_matrix <- table(predictions, Y_test)
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+cat("Accuracy:", accuracy, "\n")
+cat("Confusion Matrix:\n")
+print(conf_matrix)
+```
+
+The model resulted in an accuracy of 0.7598187 This means that about 75.98% of the predictions made by the model match the actual labels in the test set.
+
+The confusion matrix is added.
+It provides detailed information about the model's performance:
+
+True Positives: The model correctly predicted 575 instances of the "CONFIRMED" class.
+
+False Positives: The model incorrectly predicted 253 instances as "CONFIRMED" when they actually belonged to the "FALSE POSITIVE" class.
+
+False Negatives: The model incorrectly predicted 224 instances as "FALSE POSITIVE" when they actually belonged to the "CONFIRMED" class.
+
+True Negatives: The model correctly predicted 934 instances of the "FALSE POSITIVE" class.
+
+From the confusion matrix, the model tends to perform better at predicting the "CONFIRMED" class, compared to the "FALSE POSITIVE" class, as the higher number of true positives and false negatives suggest.
+
+The model demonstrated a moderate accuracy.
+The accuracy could be used to compare model fits.
+
+## Random Forest
+
+We used another non-parametric method of random forest.
+Random forest is also a useful yet versatile machine learning algorithm, that is applicable for both classification and regression tasks.
+
+Similar to KNN, the random forest does not make explicit assumptions about the data's distribution.
+Instead, it builds multiple decision trees during the training process, and combine their predictions to make a final prediction that is more robust and accurate.
+
+The random forest algorithm is known for it's randomness and bootstrap bagging.
+First, the random forest randomly selects a subset of attributes for each decision trees, which introduces randomness in the feature selection and allows diversity among them.
+Also, the random forest algorithm uses the bootstrap technique to build multiple decision trees, and each decision tree is trained on a bootstrap sample, which is sampled from the original data set with replacement.
+And the out-of-bag samples could be used for model evaluation.
+
+The main procedure of the random forest algorithm summarizes as follows:
+
+1.  Randomly select a subset of features from the data set
+
+2.  Randomly sample the data set (with replacement) to create bootstrap data sets
+
+3.  Train decision trees using each bootstrap sample and selected features
+
+4.  Combine the predictions from decision trees to make final regression or classifications.
+    For regression, the predictions of all trees are averaged to make the final prediction.
+    For classification, the prediction with the most votes is chosen as the final prediction.
+
+The significance of random forest lies on it's robustness to over fitting, as the predictions of trees are averaged or voted, which reduces the risk of over fitting, compared to individual decision trees.
+Random forest also produce accurate decisions on large data sets due to it's efficiency.
+
+```{r}
+# Load the required library
+
+data_np$koi_disposition <- as.factor(data_np$koi_disposition)
+
+# Split the data into predictors (X) and the target variable (Y)
+X <- data_np[, -which(names(data_np) == "koi_disposition")]
+Y <- data_np$koi_disposition
+
+# Train-Test Split
+set.seed(123) 
+train_indices <- sample(1:nrow(data_np), 0.7 * nrow(data_np))
+X_train <- X[train_indices, ]
+Y_train <- Y[train_indices]
+X_test <- X[-train_indices, ]
+Y_test <- Y[-train_indices]
+
+plot(randomForest(x = X_train, y = Y_train, ntree = 200))
+```
+
+Based on the plot, the error rate decreases significantly at the beginning, suggesting that adding trees initially improves the model’s performance significantly.
+After about 50 trees, the decrease on error rate slows down, suggests that additional trees does not return significantly on model improvement.
+
+## Random Forest Model - Performance
+
+We've chosen a tree of 100 in our random forest model.
+
+```{r}
+# Train the Random Forest model
+model_rf <- randomForest(x = X_train, y = Y_train, ntree = 100)
+
+# Predictions
+predictions <- predict(model_rf, X_test)
+
+# Evaluate the model
+accuracy <- mean(predictions == Y_test)
+cat("Accuracy:", accuracy, "\n")
+```
+
+According to the results, the random forest with number of trees equal to 100 resulted in a very well performing model with an accuracy of 0.9103726
+
+The random forest model's accuracy of 0.9103726 is significantly higher than 0.7598187 from KNN.
+Therefore, the random forest model is the more applicable non-parametric model for our data set.
+
+## Feature Importance with Random Forest
+
+Additionally, the feature importance scores, measured by the mean decrease GINI, provides information on the relative importance of each feature in making predictions.
+Features with higher mean decrease GINI values contribute more to the overall predictability of our model.
+
+```{r}
+# Feature Importance
+importance <- importance(model_rf)
+print(importance)
+```
+
+According to the results, the variables' importance for both transit and stellar parameters (from highest to lowest) are:
+
+Transit Parameters:
+
+koi_prad: 527.89169 koi_depth: 260.06632 koi_impact: 241.32654 koi_period: 216.23951 koi_insol: 209.61572 koi_duration: 197.02471 koi_teq: 183.30217 koi_time0bk: 107.59483
+
+Stellar Parameters:
+
+koi_steff: 109.09338 koi_slogg: 101.48828 koi_srad: 95.89204
+
+## Distribution of Predictor Variables in Random Forest Model
+
+We are interested in the distribution of predictor variables in our random forest model.
+We stored the predictions as a dataframe to investigate the minimum and maximum values that we are interested.
+
+```{r}
+predictions_df <- data.frame(Predicted_Class = predictions, X_test)
+str(predictions_df)
+#write.csv(predictions_df, file = "prediction.csv", row.names = FALSE)
+
+summary(predictions_df)
+```
+
+
+## Training and Testing Scores with Random Forest
+
+We are interested in investigating the training and testing scores with random forest model with different training sizes.
+
+```{r}
+
+# Specify different training sizes
+training_sizes <- seq(0.1, 0.9, by = 0.1)  # Example: Training sizes from 10% to 90%
+
+scores <- matrix(NA, nrow = length(training_sizes), ncol = 3)  # 3 columns for train_size, train_score, test_score
+seq_along(training_sizes)
+# Loop through different training sizes
+for (i in seq_along(training_sizes)) {
+  
+  # Train model
+  X <- data_np[, -which(names(data_np) == "koi_disposition")]
+  Y <- data_np$koi_disposition
+
+  # Train-Test Split
+  set.seed(123)
+  train_size <- sample(1:nrow(data_np), size = floor(training_sizes[i] * nrow(data_np)))
+  X_train <- X[train_size, ]
+  Y_train <- Y[train_size]
+  X_test <- X[-train_size, ]
+  Y_test <- Y[-train_size]
+
+  # Train the Random Forest model
+  model_rf <- randomForest(x = X_train, y = Y_train, ntree = 100)
+  
+  # Calculate training and test scores
+  train_pred <- predict(model_rf, newdata = X_train)
+
+  # Calculate accuracy on the training set
+  train_accuracy <- mean(train_pred == Y_train)
+  
+  test_pred <- predict(model_rf, newdata = X_test)
+  test_score <- mean(test_pred == Y_test)
+  
+  # Store scores in the matrix
+  print(floor(training_sizes[i] * nrow(data_np)))
+  print(train_accuracy)
+  print(test_score)
+  scores[i, ] <- c(floor(training_sizes[i] * nrow(data_np)), train_accuracy, test_score)
+}
+
+# Convert scores to a data frame
+scores_df <- as.data.frame(scores)
+names(scores_df) <- c("train_size", "train_score", "test_score")
+
+# Plot training and test scores
+ggplot(scores_df, aes(x = train_size)) +
+  geom_line(aes(y = train_score, color = "Training Score")) +
+  geom_line(aes(y = test_score, color = "Test Score")) +
+  scale_color_manual(values = c("blue", "red")) +
+  labs(x = "Training Size", y = "Score") +
+  ggtitle("Training and Test Score Curves for Random Forest") +
+  theme_minimal()+
+  scale_y_continuous(limits = c(0.50, 1))
+```
+
+On the training and test score curve, the x-axis shows the training size, which ranges from 10% to 90% of the dataset.The training score is set as 1 for comparison, and the test Score represents the model’s accuracy on the test set.
+It’s slightly lower than the training score, which suggests that the model is generalizing a relatively well predictability, and the overall predictability increases over introducing more data points (training size).
+
+# Model Comparison
+
+We've trained and accessed several parametric and non-parametric models.
+
+Generalized Additive Model (GAM): Achieved an accuracy of approximately 89.59%.
+Generalized Linear Mixed Model (GLMM): Achieved a high accuracy of approximately 96.98%.
+K-Nearest Neighbors (KNN): Achieved an accuracy of approximately 75.98%.
+Random Forest: Achieved the highest accuracy among non-parametric models, approximately 91.04%.
+
+```{r}
+
+model_comparison <- read.csv("modelcomparison.csv", header = TRUE, check.names = FALSE, fileEncoding = "UTF-8")
+kable(metadata, caption = "Model Accuracy")
+```
+
+Comparing these accuracy scores and plots above, we can observe that Random Forest gives the best fit for the dataset. The GAM also performed well, while the KNN model had the lowest accuracy among the models evaluated.
+
+### RESULTS FOR RQ 1
+
+The Random Forest models gives best fit for predicting the disposition of exoplanets, suggesting that they could potentially be the most effective models for this task based on our data.
+
+Our findings indicate that both the characteristics of the observed parameters and stellar characteristics serve as crucial factors in classifying Kepler Objects of Interest as actual planets. Among the observed parameters, koi_prad (Planetary Radius), koi_depth (Transit Depth), and koi_impact (Impact Parameter) emerge as the most influential variables. Particularly, koi_prad (Planetary Radius) stands out as the most significant predictor for distinguishing actual planets.
+
+According to the result, with the random forest model, the minimum and maximum values of predictor variables are as follows:
+
+Stellar Parameters:
+
+Variable    Min.     Max.
+
+---------------------------
+koi_steff   2661     15896
+koi_slogg   0.269    5.283
+koi_srad    0.116    138.056
+
+Variable       Min.       Max.
+
+--------------------------------
+koi_period    0.329     670.646
+koi_time0bk   120.6     746.2
+koi_impact    0.000     15.329
+koi_duration  0.105     138.540
+koi_depth     4.5       922000.0
+koi_prad      0.180     2674.690
+koi_teq       134       14667
+koi_insol     0         10947555
+
+Similarly, when considering stellar parameters, koi_steff (Stellar Effective Temperature), koi_slogg (Stellar Surface Gravity), and koi_srad (Stellar Radius) demonstrate comparable effectiveness in modeling efforts, with koi_steff being the most influential among them.
+
+# To gauge Earth-size+ planets in the habitable zone ("Goldilocks") across various star types
+
+"Goldilocks planets," also known as "Goldilocks zone planets" or "habitable planets," refer to exoplanets that orbit within the habitable zone of a star.
+The habitable zone is the region around a star where conditions are just right for liquid water to exist on the surface, which is considered a crucial ingredient for life as we know it.[2]
+
+#### Checking habitability based on the presence of water
+
+The primary criterion for an Earth-like habitable planet is the presence of liquid water.
+This necessitates an equilibrium temperature (represented as koi_teq in astronomical terms) within the range of 273.2 Kelvin to 373.2 Kelvin.
+This step is performed just for confirmed exoplanets.
+
+```{r}
+#this part can be removed when compiling
+data_r2 <- project_data[project_data$koi_disposition != "CANDIDATE",]
+data_r2$koi_disposition <- factor(data_r2$koi_disposition, levels=c("CONFIRMED","FALSE POSITIVE"))
+##---- Discard any rows which has null value or NA value
+complete_rows <- complete.cases(data_r2)
+
+##---- Select the subset which only includes these complete rows
+data_r2 <- data_r2[complete_rows, ]
+```
+
+```{r}
+confirmed_data <- data_r2[data_r2$koi_disposition == "CONFIRMED",]
+```
+
+```{r}
+
+# Create a new column 'goldilocks_temp' based on conditions
+confirmed_data$goldilocks_temp <- (273.2 <= confirmed_data$koi_teq) & (confirmed_data$koi_teq <= 373.2)
+
+# Initialize a list to store goldilocks counts
+goldilocks_counts <- list(temp = list())
+
+# Calculate counts for each temperature range
+goldilocks_counts$temp$too_cold <- sum(confirmed_data$koi_teq <= 273.2)
+goldilocks_counts$temp$just_right <- sum(confirmed_data$goldilocks_temp == TRUE)
+goldilocks_counts$temp$too_hot <- sum(confirmed_data$koi_teq >= 373.2)
+
+# Print the counts
+for (key in names(goldilocks_counts$temp)) {
+  value <- goldilocks_counts$temp[[key]]
+  percentage <- 100 * value / nrow(confirmed_data)
+  cat(sprintf("Exoplanets that are %-10s: %4d (%5.2f%%)\n", key, value, percentage))
+}
+
+counts_df <- data.frame(
+  Type = c("too_cold", "just_right", "too_hot"),
+  Count = c(goldilocks_counts$temp$too_cold, goldilocks_counts$temp$just_right, goldilocks_counts$temp$too_hot)
+)
+
+# Print the data frame
+#print(counts_df)
+
+percentages <- round((counts_df$Count / sum(counts_df$Count)) * 100, 2)
+barplot(counts_df$Count,names.arg = counts_df$Type , col = "skyblue",
+        main = "Count of Planets", x_lab = "temperature range", y_lab = "count")
+# text(x = barplot(counts_df$Count) - 0.2, y = counts_df$Count + 0.5, 
+#
+
+```
+
+Based on the above results, we can infer that only 4.98% of exoplanents have habitable temperature.
+
+#### Checking habitability based on the planetary radius
+
+Upon researching, we have identified that if the range of radii of exoplanet range is between 0.5 and 1.5 Earth radii, then it can be considered a potential habitable planet.
+The koi_prad prad column is used for this step.[3]
+
+```{r}
+# Create a new column 'goldilocks_size' based on conditions
+confirmed_data$goldilocks_size <- (0.5 <= confirmed_data$koi_prad) & (confirmed_data$koi_prad <= 1.5)
+
+# Initialize a list to store goldilocks counts
+goldilocks_counts <- list(size = list())
+
+# Calculate counts for each size range
+goldilocks_counts$size$too_small <- sum(confirmed_data$koi_prad <= 0.5)
+goldilocks_counts$size$just_right <- sum(confirmed_data$goldilocks_size == TRUE)
+goldilocks_counts$size$too_big <- sum(confirmed_data$koi_prad >= 1.5)
+
+# Print the counts
+for (key in names(goldilocks_counts$size)) {
+  value <- goldilocks_counts$size[[key]]
+  percentage <- 100 * value / nrow(confirmed_data)
+  cat(sprintf("Exoplanets that are %-10s: %4d (%5.2f%%)\n", key, value, percentage))
+}
+
+# Visualize the results
+# Extract counts and labels for plotting
+counts <- unlist(goldilocks_counts$size)
+labels <- names(counts)
+barplot(counts, names.arg = labels, xlab = "Size Range", ylab = "Count", col = "skyblue", main = "Counts of Exoplanets by Size Range")
+```
+
+Based on the above results, we can infer that only 24.73% of exoplanents have habitable planetary radii.
+Now we can check the combination of two parameters for determing exoplanet's habitability.
+
+```{r}
+# Assuming you have a dataframe named 'dataset' in R similar to the one used in the Python code
+
+# Create a new column 'goldilocks' based on conditions
+confirmed_data$goldilocks <- (confirmed_data$goldilocks_temp == TRUE) & (confirmed_data$goldilocks_size == TRUE)
+
+# Initialize a list to store goldilocks counts
+goldilocks_counts <- list(combined = list())
+
+# Calculate counts for "just right" exoplanets
+goldilocks_counts$combined$just_right <- sum(confirmed_data$goldilocks == TRUE)
+# Print the counts
+for (key in names(goldilocks_counts)) {
+  value <- goldilocks_counts[[key]]$just_right
+  percentage <- 100 * value / nrow(confirmed_data)
+  cat(sprintf("Exoplanets that are 'just right' %-10s: %4d (%5.2f%%)\n", key, value, percentage))
+}
+
+
+```
+
+Out of 2730, 14 planets are considered to be potential habitable exoplanets based equilibrium temperature and planetary radii.
+
+#### Visualise the confirmed exoplanets
+
+```{r}
+
+# Set the plot size
+options(repr.plot.width=20, repr.plot.height=10)
+potentially_habitable <- subset(confirmed_data, goldilocks_temp == TRUE )
+# Create the scatter plot
+ggplot(data = potentially_habitable , aes(x = koi_teq, y = koi_prad, color = goldilocks)) +
+  geom_point(alpha = 0.6) +
+  scale_size(range = c(20, 400)) +
+  scale_color_manual(values = c("blue", "red"), name = "Goldilocks Temp",
+                     labels = c("False", "True")) +
+  labs(title = "Confirmed Exoplanets in the Goldilocks Temperature",
+       x = "Temperature (Kelvin)",
+       y = "Radius (Earth Radii)") +
+  theme_minimal()
+
+# Set options to display all rows and columns
+options(repr.matrix.max.rows=Inf, repr.matrix.max.cols=Inf)
+
+# Calculate and print the number of potentially habitable exoplanets
+
+potentially_habitable <- subset(confirmed_data, goldilocks == TRUE )
+cat("Number of potentially habitable exoplanets: ", nrow(potentially_habitable), "\n")
+
+# Print the names of potentially habitable exoplanets
+cat("Names of potentially habitable exoplanets: ", paste(potentially_habitable$kepler_name, collapse = ", "), "\n")
+
+# Display the potentially habitable exoplanets
+#print(potentially_habitable)
+
+
+```
+All the red dots in the scatter plot represent confirmed exoplanets against radius and temperature.
+
+```{r}
+# Set options to display all rows and columns
+options(repr.matrix.max.rows=Inf, repr.matrix.max.cols=Inf)
+
+# Calculate and print the number of potentially habitable exoplanets
+potentially_habitable <- subset(confirmed_data, goldilocks == TRUE)
+cat("Number of potentially habitable exoplanets: ", nrow(potentially_habitable), "\n")
+
+# Print the names of potentially habitable exoplanets
+cat("Names of potentially habitable exoplanets: ", paste(potentially_habitable$kepler_name, collapse = ", "), "\n")
+
+```
+
+Names of potentially habitable exoplanets: Kepler-54 d, Kepler-249 d, Kepler-296 b, Kepler-367 c, Kepler-395 c, Kepler-138 d, Kepler-186 e, Kepler-220 e, Kepler-1582 b, Kepler-438 b, Kepler-1512 b, Kepler-1126 c, Kepler-1185 b, Kepler-1646 b
+
+#### Visualise the confirmed exoplanets against Stellar Mass and Orbital Distance
+
+```{r}
+
+
+# Filter the dataset to include only rows where 'goldilocks' is True
+df <- subset(confirmed_data, goldilocks == TRUE)
+
+# Perform KMeans clustering
+df$KMeans_StarType <- kmeans(df[, c('koi_sma', 'koi_smass')], centers = 4)$cluster
+print(df$KMeans_StarType)
+# Create the scatter plot
+p <- ggplot(data = df, aes(x = koi_sma, y = koi_smass, size = sqrt(koi_prad), color = factor(KMeans_StarType))) +
+  geom_point(alpha = 0.6) +
+  scale_size(range = c(1, 3)) +
+  scale_color_manual(values = c("blue", "green", "orange", "red"), name = "KMeans_StarType") +  
+  geom_text(aes(label = kepler_name), hjust = 0, vjust = 0) +  
+  labs(title = "Confirmed Goldilocks Exoplanets by StarType",
+       x = "Semi Major Axis / Orbital Distance (AU)",
+       y = "Stellar Mass (solar mass)") +
+  theme_minimal()
+
+# Print the plot
+print(p)
+
+
+
+```
+
+Based on the above plot, we can there are majorly four clusters of exoplanets.
+The largest cluster has been shown above in red.
+Stellar Mass ranges from 0.3 to 0.62 approx and Orbital Distance ranges from 0.05 -0.3 for the largest cluster.
+
+#### Visualise the confirmed exoplanets against Planetary Radius vs Stellar Metallicity
+
+Plotting the planetary radius against stellar metallicity can offer insights into the composition of planets.
+High-metallicity stars are more inclined to form rocky planets, as opposed to water/ice worlds or carbon planets.
+
+```{r}
+df$KMeans_PlanetType <- kmeans(df[, c('koi_smet', 'koi_prad')], centers = 6)$cluster
+
+# Create the scatter plot
+p <- ggplot(data = df, aes(x = koi_smet, y = koi_prad, size = sqrt(koi_prad), color = factor(KMeans_PlanetType))) +
+  geom_point(alpha = 0.6) +
+  scale_size(range = c(1, 3)) +  # Adjust the range of sizes as needed
+  scale_color_manual(values = c("blue", "green", "orange", "red", "purple", "yellow"), name = "KMeans_PlanetType") +  
+  geom_text(aes(label = kepler_name), hjust = 0, vjust = 0) +  
+  labs(title = "Confirmed Goldilocks Exoplanets by PlanetType",
+       x = "Stellar Metallicity",
+       y = "Planetary Radius (Earth radii)") +
+  theme_minimal()
+
+# Print the plot
+print(p)
+
+
+```
+
+Based on the above plot, we can there are majorly 6 clusters of exoplanets based on Planetary Radius vs Stellar Metallicity.
+The largest cluster has been shown above in green.
+
+#### Visualise Starmap to locate exoplanents in the sky
+
+```{r}
+# Convert goldilocks to a factor
+confirmed_data$goldilocks <- factor(confirmed_data$goldilocks)
+
+# Create the scatter plot
+p <- ggplot(data = confirmed_data, aes(x = ra, y = dec, color = goldilocks)) +
+  geom_point(alpha = 0.6) +
+  scale_size_manual(values = c(20, 200)) +  # Adjust the size range as needed
+  scale_color_manual(values = c("blue", "red"), name = "Goldilocks") +  # Discrete color scale
+  labs(title = "Goldilocks Exoplanets",
+       x = "RA",
+       y = "Dec") +
+  theme_minimal()
+
+# Print the plot
+print(p)
+```
+
+In the above, all red ones are confirmed exoplanets.
+
+### RESULTS FOR RQ 2
+
+The analysis of confirmed exoplanets reveals intriguing insights into their potential habitability and composition.
+By examining the presence of liquid water, a fundamental criterion for habitability, it was found that only 4.98% of exoplanets possess temperatures within the optimal range, crucial for sustaining liquid water on their surfaces.
+Furthermore, considering the planetary radii, approximately 24.73% of confirmed exoplanets fall within the potential habitable range, indicating their suitability for supporting life based on size criteria alone.
+Interestingly, when both temperature and radius criteria are combined, only 14 out of 2730 confirmed exoplanets are identified as potential habitable candidates, underscoring the stringent conditions necessary for habitability.
+Notable among these are Kepler-54 d, Kepler-249 d, and Kepler-296 b, among others.
+Visualizations of confirmed exoplanets against stellar mass and orbital distance reveal distinct clusters, with the largest cluster characterized by a stellar mass ranging from 0.3 to 0.62 and an orbital distance from 0.05 to 0.3.
+Additionally, plotting planetary radius against stellar metallicity highlights six clusters, with the largest cluster suggesting a correlation between high-metallicity stars and the prevalence of rocky planets.
+Lastly, a starmap depicting confirmed exoplanets in the sky showcases their spatial distribution, aiding astronomers in locating and studying these intriguing celestial bodies.
+These findings shed light on the potential habitability and diverse compositions of confirmed exoplanets, opening avenues for further exploration and research in the field of exoplanetary science.
+
+## To establish the correlation between the different causes for disposition values "FALSE POSITIVE", "CONFIRMED" and "CANDIDATE". Also to establish the correlation between disposition values and flag variables.
+
+Understanding the correlations between disposition values ("FALSE POSITIVE," "CONFIRMED," and "CANDIDATE") and associated flag variables in exoplanet data allows for improved classification accuracy, enabling more reliable identification of genuine planets and false positives.[7]
+
+```{r}
+library(dplyr)
+data_set <- project_data
+head(data_set,n=10)
+```
+
+The variable 'koi_comment' gives the reason for disposition values.
+Initial analysis is showing that there are 52 different comments assigned for each planet to indicating the reason for 'koi_disposition' value.The description for each comment and the flag values are given in the Figures and References section[4]
+
+```{r}
+
+print(unique(data_set$koi_comment))
+```
+
+One hot encoding the 'koi_comment' variable and 'koi_disposition' classes to establish the importance of each comment over the different values of 'koi_disposition'.
+
+```{r}
+
+data_set$koi_comment <- as.factor(data_set$koi_comment)
+newdata <- one_hot(as.data.table(data_set))
+
+print(newdata)
+```
+
+```{r}
+
+newdata$koi_disposition <-as.factor(newdata$koi_disposition)
+final_dataset <- one_hot(as.data.table(newdata))
+
+print(final_dataset)
+str(final_dataset)
+```
+
+```{r}
+
+correlation_mat_flags <- data.frame(
+  koi_disposition_CONFIRMED = numeric(0),
+  koi_disposition_CANDIDATE = numeric(0),
+  koi_disposition_FALSE_POSITIVE = numeric(0)
+)
+```
+
+```{r}
+
+
+comments <- grep('koi_comment', names(final_dataset), value = TRUE)
+# print(comments)
+
+
+target_vars <- c("koi_disposition_CONFIRMED", "koi_disposition_CANDIDATE", "koi_disposition_FALSE POSITIVE")
+flag_vars <- c("koi_fpflag_nt","koi_fpflag_ss","koi_fpflag_co","koi_fpflag_ec")
+
+# Get the column names containing 'koi_comment'
+comment_vars <- grep("^koi_comment_", names(final_dataset), value = TRUE)
+
+# Subset the final_dataset to include only the descriptor and target variables
+subset_1 <- final_dataset[, c(comment_vars), with = FALSE]
+subset_2 <- final_dataset[, c(target_vars), with = FALSE]
+subset_3 <- final_dataset[, c(flag_vars), with = FALSE]
+
+# dim(subset_data)
+# dim(subset1)
+library(psych)
+
+correlation_matrix1 <- cor(subset_1,subset_2)
+correlation_matrix2 <- cor(subset_3,subset_2)
+
+```
+
+#### CORRELATION TABLE FOR COMMENTS VS DISPOSITION VALUES
+
+```{r}
+corr_df1 <- as.data.frame(correlation_matrix1)
+corr_df1
+
+```
+
+**Inference**
+
+One major inference that can be made from the correlation results is that whenever the correlation is negative for 'comment' and 'False Positive', 'Confirmed' has a positive value there and vice versa.
+Majority of the comment vaues are posotively correlated with FALSE POSITIVE and anti-correlated with CONFIRMED or CANDIDATE.
+Also, 'NO_COMMENT' has the highest negative correlation with 'Confirmed' disposition meaning that the exoplanets confirmed doesn't have any justification mentioned for their disposition value.
+![Alt text](corr_results.jpg "Optional title")
+
+#### Correlation between FLAG variables and disposition values
+
+```{r}
+corr_df2 <- as.data.frame(correlation_matrix2)
+corr_df2
+
+```
+
+The correlation values show that 'fp_flag_ss' has the highest correlation with False positive meaning that secondary signals has the highest impact on exoplanet being falsely identified.
+Every flag value has positive correlation with 'FALSE POSITIVE' disposition and anti-correlation with 'CoNFIRMED'.
+
+
+### RESULTS FOR RQ 3
+
+Overall it can be concluded that False Positive values can be majorly due to A KOI that is observed to have a significant secondary event, transit shape, or out-of-eclipse variability, which indicates that the transit-like event is most likely caused by an eclipsing binary.
+However, self-luminous, hot Jupiters with a visible secondary eclipse will also have this flag set, but with a disposition of PC.
+Since the flag 'fp_flag_ss' has the highest correlation including all the different Comment values and flag values.[8]
+
+\newpage
+
+# Figures
+![Alt text](comment1.jpg "Optional title")
+
+
+![Alt text](comment2.jpg "Optional title")
+
+
+![Alt text](comment3.jpg "Optional title")
+
+![Alt text](comment4.jpg "Optional title")
+
+![Alt text](flag.jpg "Optional title")
+
+\newpage
+
+# References:  
+
+[1] NASA Exoplanet Archive. KOI (Kepler Objects of Interest). Exoplanet Archive. https://exoplanetarchive.ipac.caltech.edu/cgi-bin/TblView/nph-tblView?app=ExoTbls&config=koi
+
+[2] Phys.org. (2011, September). Heavy metal stars look to be the perfect environment for Earth-like planets.  https://phys.org/news/2011-09-heavy-metal-stars-earth-like-planets.html
+
+[3] Wikipedia contributors. Planetary habitability. Wikipedia. https://en.wikipedia.org/wiki/Planetary_habitability
+
+[4] NASA Exoplanet Science Institute. Kepler Candidate Overview Table Column Definitions. Exoplanet Archive. https://exoplanetarchive.ipac.caltech.edu/docs/API_kepcandidate_columns.html
+
+[5] Matteo Fasiolo, (Year). mgcViz: An R Package for Visual Inference and Diagnostics with Additive Models. GitHub repository. Available at: https://github.com/mfasiolo/mgcViz
+
+[6] Exoplanet exploration: Planets beyond our solar system (2015) NASA. Available at: https://exoplanets.nasa.gov/ (Accessed: 10 April 2024).
+
+[7] NASA. (2022, June). Hubble Focus: Exoplanets. Retrieved from https://www.nasa.gov/wp-content/uploads/2022/06/hubble_focus_exoplanets_june2022.pdf
+
+[8] Howell, E. and Harvey, A. (2022) The 10 most Earth-like exoplanets, Space.com. Available at: https://www.space.com/30172-six-most-earth-like-alien-planets.html.
+

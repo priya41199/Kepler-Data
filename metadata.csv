@@ -1,0 +1,34 @@
+Database Column Name,Table Label ,Description,Data Type
+kepid,KepID," Target identification number, as listed in the Kepler Input Catalog (KIC).",Quantitative
+kepoi_name,"KOI Name
+",A number used to identify and track a Kepler Object of Interest (KOI).,Categorical
+kepler_name,Kepler Name,"Kepler number name in the form ""Kepler-N,"" plus a lower-case letter, identifying the planet.",Categorical
+koi_disposition,Exoplanet Archive Disposition,"The category of this KOI from the Exoplanet Archive. Levels:  CANDIDATE, FALSE POSITIVE, NOT DISPOSITIONED, CONFIRMED",Categorical
+koi_pdisposition,Disposition Using Kepler Data,"The pipeline flag that designates the most probable physical explanation of the KOI. Levels: FALSE POSITIVE, NOT DISPOSITIONED, and CANDIDATE.",Categorical
+koi_score,Disposition Score,A value between 0 and 1 that indicates the confidence in the KOI disposition.,Quantitative
+koi_fpflag_nt,"Not Transit-Like Flag
+",A KOI whose light curve is not consistent with that of a transiting planet.,Quantitative
+koi_fpflag_ss,Stellar Eclipse Flag,"A KOI that is observed to have a significant secondary event, transit shape, or out-of-eclipse variability, which indicates that the transit-like event is most likely caused by an eclipsing binary. ",Quantitative
+koi_fpflag_co,Centroid Offset Flag,"The source of the signal is from a nearby star, as inferred by measuring the centroid location of the image both in and out of transit, or by the strength of the transit signal in the target's outer (halo) pixels as compared to the transit signal from the pixels in the optimal (or core) aperture.",Quantitative
+koi_fpflag_ec,"Ephemeris Match Indicates Contamination Flag
+",The KOI shares the same period and epoch as another object and is judged to be the result of flux contamination in the aperture or electronic crosstalk.,Quantitative
+koi_period,Orbital Period [days],The interval between consecutive planetary transits.,Quantitative
+koi_time0bk,"Transit Epoch (BJD - 2,454,833.0)","The time corresponding to the center of the first detected transit in Barycentric Julian Day (BJD) minus a constant offset of 2,454,833.0 days.",Quantitative
+koi_impact,Impact Parameter,"The sky-projected distance between the center of the stellar disc and the center of the planet disc at conjunction, normalized by the stellar radius.",Quantitative
+koi_duration,Transit Duration (hours),The duration of the observed transits. ,Quantitative
+koi_depth,Transit Depth (parts per million),The fraction of stellar flux lost at the minimum of the planetary transit. ,Quantitative
+koi_prad,Planetary Radius (Earth radii),The radius of the planet.,Quantitative
+koi_teq,Equilibrium Temperature (Kelvin),Approximation for the temperature of the planet. ,Quantitative
+koi_insol,Insolation Flux [Earth flux],Insolation flux is another way to give the equilibrium temperature. ,Quantitative
+koi_model_snr,Transit Signal-to-Noise,Transit depth normalized by the mean uncertainty in the flux during the transits.,Quantitative
+koi_tce_plnt_num,TCE Planet Number,TCE Planet Number federated to the KOI.,Quantitative
+koi_tce_delivname,TCE Delivery Name,TCE delivery name corresponding to the TCE data federated to the KOI.,Categorical
+koi_steff,Stellar Effective Temperature (Kelvin),The photospheric temperature of the star.,Quantitative
+koi_slogg,"Stellar Surface Gravity (log10(cm s-2)
+",The base-10 logarithm of the acceleration due to gravity at the surface of the star.,Quantitative
+koi_srad,Stellar Radius (solar radii),The photospheric radius of the star,Quantitative
+ra,RA (deg),KIC Right Ascension,Quantitative
+dec,"Dec (deg)
+","KIC Declination
+",Quantitative
+koi_kepmag,Kepler-band (mag),Kepler-band (mag),Quantitative
